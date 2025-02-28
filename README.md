@@ -1,5 +1,4 @@
- # Cmpe591 Deep Learning for Robotics Project 1: 
-
+ # Cmpe591 Deep Learning for Robotics Project 2: 
 
 # How to run:
 
