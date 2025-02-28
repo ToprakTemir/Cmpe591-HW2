@@ -82,7 +82,7 @@ class Hw2Env(environment.BaseEnv):
         self._set_ee_in_cartesian(target_pos, rotation=[-90, 0, 180], n_splits=30, threshold=0.04)
         self._t += 1
 
-        state = self.state()
+        state = self.high_level_state()
         reward = self.reward()
         terminal = self.is_terminal()
         truncated = self.is_truncated()

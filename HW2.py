@@ -53,12 +53,14 @@ class QNetworkCNN(nn.Module):
             nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1), # 16 x 16 -> 8 x 8
             nn.ReLU(),
             nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1), # 8 x 8 -> 4 x 4
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Linear(512, 8)
+            nn.AdaptiveAvgPool2d((1, 1)), # 4 x 4 -> 1 x 1
         )
+        self.fc = nn.Linear(512, 8)
 
     def forward(self, state):
         x = self.CNN(state)
+        x = x.view(x.shape[0], -1)
+        x = self.fc(x)
         return x
 
 
@@ -92,10 +94,10 @@ class Transition:
 
 class DQNAgent:
     def __init__(self, state_dim, lr=0.001, gamma=0.99, epsilon_min=0.1, epsilon=1.0, decay_rate=0.999, decay_iter=10):
-        # self.q_network = QNetwork(state_dim).to(device)
-        # self.target_network = QNetwork(state_dim).to(device)
-        self.q_network = QNetworkCNN().to(device)
-        self.target_network = QNetworkCNN().to(device)
+        self.q_network = QNetwork(state_dim).to(device)
+        self.target_network = QNetwork(state_dim).to(device)
+        # self.q_network = QNetworkCNN().to(device)
+        # self.target_network = QNetworkCNN().to(device)
         self.target_network.load_state_dict(self.q_network.state_dict())
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
         self.gamma = gamma
@@ -114,6 +116,8 @@ class DQNAgent:
         if np.random.rand() < self.epsilon:
             return np.random.randint(0, 8)
         else:
+            state = state.unsqueeze(0)
+
             return torch.argmax(self.q_network(state)).item()
 
     # Since we will use Double Q learning, we want to use different networks to compute the reward and the target
@@ -147,7 +151,7 @@ class DQNAgent:
             return self.replay_buffer
         return random.sample(self.replay_buffer, batch_size)
 
-    def train(self, batch_size):
+    def training_loop(self, batch_size):
         if len(self.replay_buffer) < batch_size:
             return
 
@@ -192,6 +196,78 @@ class DQNAgent:
         ##     if self.update_count % self.decay_iter == 0:
         ##         self.decay_epsilon()
 
+    def train(self,
+        env=None,
+        n_episodes = 5000,
+        batch_size = 64,
+        update_freq = 4
+        ):
+        if env is None:
+            env = Hw2Env(n_actions=8, render_mode="offscreen")
+
+        # HYPERPARAMETERS: batch_size, update_freq
+        reward_list = np.zeros(n_episodes)
+        for episode in range(n_episodes):
+            env.reset()
+            done = False
+            cum_reward = 0.0
+            start = time.time()
+            action_count = 0
+            while not done:
+                state = torch.tensor(env.high_level_state(), dtype=torch.float32).to(device)
+                action = agent.get_action(state)
+                next_state, reward, is_terminal, is_truncated = env.step(action)
+
+                transition = Transition(state, action, reward, next_state)
+                agent.add_to_replay_buffer(transition)
+                action_count += 1
+                if action_count % update_freq == 0:
+                    agent.training_loop(batch_size)
+
+                done = is_terminal or is_truncated
+                cum_reward += reward
+
+            end = time.time()
+            print(f"Episode={episode}, reward={cum_reward}, RPS={cum_reward / 50}")
+
+            # save reward for episode-reward graph
+            reward_list[episode] = cum_reward
+
+        np.save('HW2/reward_list.npy', reward_list)
+        self.plot_reward(reward_list)
+        agent.save('model_new.pth')
+
+
+    def plot_reward(self, reward_list):
+        # plot the reward
+        plt.plot(reward_list)
+        plt.xlabel('Episode')
+        plt.ylabel('Reward')
+        plt.savefig('reward_plot.png')
+
+        # plot the smoothed reward
+        smoothed_reward_list = np.convolve(reward_list, np.ones(100) / 100, mode='valid')
+        plt.plot(smoothed_reward_list)
+        plt.xlabel('Episode')
+        plt.ylabel('Smoothed Reward')
+        plt.savefig('smoothed_reward_plot.png')
+        plt.close()
+
+        # plot reward per step
+        rps_list = reward_list / 50
+        plt.plot(rps_list)
+        plt.xlabel('Episode')
+        plt.ylabel('Reward per Step')
+        plt.savefig('rps_plot.png')
+
+        # plot smoothed reward per step
+        smoothed_rps_list = np.convolve(rps_list, np.ones(100) / 100, mode='valid')
+        plt.plot(smoothed_rps_list)
+        plt.xlabel('Episode')
+        plt.ylabel('Smoothed Reward per Step')
+        plt.savefig('smoothed_rps_plot.png')
+
+
     def decay_epsilon(self):
         self.decay_epsilon_exponential()
 
@@ -208,71 +284,50 @@ class DQNAgent:
         self.q_network.load_state_dict(torch.load(path))
         self.target_network.load_state_dict(torch.load(path))
 
-    def set_epsilon_zero(self):
-        self.epsilon = 0
-
     def set_epsilon_min(self):
         self.epsilon = self.epsilon_min
 
-    def set_epsilon(self, epsilon):
-        self.epsilon = epsilon
 
-# Train the agent in the simulation environment
+def test(model_path='model.pth'):
+    # load model from model.pth
+    agent = DQNAgent(6)
+    agent.load(model_path)
+    agent.set_epsilon_min()
 
-if __name__ == "__main__":
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    agent.q_network.to(device)
+
+    # Test the agent in the simulation environment
+
     N_ACTIONS = 8
-    env = Hw2Env(n_actions=N_ACTIONS, render_mode="offscreen")
-
-    state_dim = 6
-    agent = DQNAgent(state_dim)
-    # agent.load('model.pth')
-
-    # HYPERPARAMETERS: batch_size, update_freq
-    n_episodes = 2000
-    batch_size = 64
-    update_freq = 4
-    reward_list = np.zeros(n_episodes)
-    for episode in range(n_episodes):
+    env = Hw2Env(n_actions=N_ACTIONS, render_mode="gui")
+    for episode in range(100):
         env.reset()
         done = False
         cum_reward = 0.0
-        start = time.time()
-        action_count = 0
         while not done:
-            state = torch.tensor(env.state(), dtype=torch.float32).to(device)
+            state = torch.tensor(env.high_level_state(), dtype=torch.float32).to(device)
             action = agent.get_action(state)
-            next_state, reward, is_terminal, is_truncated = env.step(action)
-
-            transition = Transition(state, action, reward, next_state)
-            agent.add_to_replay_buffer(transition)
-            action_count += 1
-            if action_count % update_freq == 0:
-                agent.train(batch_size)
-
+            state, reward, is_terminal, is_truncated = env.step(action)
             done = is_terminal or is_truncated
             cum_reward += reward
+        print(f"Episode={episode}, reward={cum_reward}")
 
-        end = time.time()
-        print(f"Episode={episode}, reward={cum_reward}, RPS={cum_reward/50}")
 
-        # plot episode-reward graph
-        reward_list[episode] = cum_reward
 
-    np.save('HW2/reward_list.npy', reward_list)
-    plt.plot(reward_list)
-    plt.xlabel('Episode')
-    plt.ylabel('Reward')
-    plt.savefig('reward_plot.png')
+if __name__ == "__main__":
+    state_dim = 6
+    agent = DQNAgent(state_dim)
 
-    # plot the smoothed reward
-    smoothed_reward_list = np.convolve(reward_list, np.ones(100)/100, mode='valid')
-    plt.plot(smoothed_reward_list)
-    plt.xlabel('Episode')
-    plt.ylabel('Smoothed Reward')
+    # optionally load model from path
+    # agent.load('model.pth')
 
-    # save the plot instead of displaying it
-    plt.savefig('smoothed_reward_plot.png')
+    agent.train()
 
-    # save the model
-    agent.save('model_new.pth')
+    # rewards_list = np.load('reward_list.npy')
+    # agent.plot_reward(rewards_list)
+
+    test()
+
+
 
