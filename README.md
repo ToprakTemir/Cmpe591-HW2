@@ -17,3 +17,8 @@ RPS plot:
 
 ![smoothed_rps_plot](https://github.com/user-attachments/assets/d8bfcbb1-9667-40bd-9240-5de5c9b4a79e)
 
+## Installation & Dependencies
+I used a conda virtual environment for the project, exact environment details are given in the environment.yml file. 
+For installing the virtual environment:
+
+    conda env create -f environment.yml
