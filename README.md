@@ -8,6 +8,7 @@ An example of creating a DQN, optionally loading already trained model, creating
 
 train() function in the DQNAgent class automatically creates the necessary environment and trains a new model. test() function creates the environment in GUI mode and runs the trained model.
 
+**Note:** I used high level state for observations, and used 50 step per episode.
 
 Reward Plot:
 
